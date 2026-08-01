@@ -67,7 +67,7 @@ TauriTavern 的 TT-Sync 支持同步 `extensions.local` / `extensions.third_part
 | 启用大纲生成 | 总开关 |
 | 大纲 API 地址 | OpenAI 兼容接口，如 `https://api.openai.com/v1`；可填中转/中继地址（见下方 CORS） |
 | 大纲 API Key | 大纲模型的密钥；不需要鉴权的中继可留空 |
-| 大纲模型名 | 例如 `deepseek-chat`、`gpt-4o-mini`、`qwen-plus` 等 |
+| 大纲模型名 | 例如 `deepseek-chat`、`gpt-4o-mini`、`qwen-plus` 等；可点旁边的「**获取模型**」按钮直接从接口拉取列表并下拉选择 |
 | 温度 / 最大tokens | 大纲模型采样参数 |
 | 超时(秒) | 大纲请求超时；超时后按「失败」处理继续发主请求（failOpen 时） |
 | 取最近消息 | 拿最近多少条聊天记录给大纲模型当依据 |
@@ -94,13 +94,15 @@ TauriTavern 手机端本质是 WebView，扩展里直接 `fetch` 外部 API 会�
 2. **本地/服务器中继**（推荐，官方 API 通用）
    在本机或一台服务器上运行随附的 `relay-server.js`：
    ```bash
-   UPSTREAM_URL="https://api.openai.com/v1/chat/completions" \
+   UPSTREAM_BASE="https://api.openai.com/v1" \
    UPSTREAM_KEY="sk-xxxx" \
    PORT=8799 \
    node relay-server.js
    ```
-   手机和电脑在同一 Wi-Fi 时，扩展里填 `http://电脑局域网IP:8799` 即可。
+   手机和电脑在同一 Wi-Fi 时，扩展里填 `http://电脑局域网IP:8799` 即可（中继同时支持 `POST /chat/completions` 和 `GET /models`，扩展的「获取模型」按钮也能用）。
    也可以部署到 Render / Railway / Fly.io 等平台拿公网 HTTPS 地址。
+
+   > 兼容旧写法：用 `UPSTREAM_URL="https://api.openai.com/v1/chat/completions"` 也能跑（自动推导 base）。
 
 3. **Tauri 原生 HTTP 通道（实验性）**
    勾选「尝试 Tauri 原生 HTTP 通道」，直连失败时会尝试 `window.__TAURI__.http`。

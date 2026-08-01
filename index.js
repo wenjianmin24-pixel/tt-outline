@@ -175,6 +175,89 @@ function extractOutlineText(status, data) {
     throw new Error(`大纲 API 返回 HTTP ${status}：${detail || '未知错误'}`);
 }
 
+/* ---------------- 获取模型列表（OpenAI 兼容 /models） ---------------- */
+
+export async function fetchModelList() {
+    const s = extension_settings[MODULE_NAME];
+    const base = String(s.apiBaseUrl || '').trim().replace(/\/+$/, '');
+    if (!base) {
+        throw new Error('未填写大纲 API 地址');
+    }
+    const url = /\/models$/.test(base) ? base : `${base}/models`;
+
+    const headers = { 'Content-Type': 'application/json' };
+    const key = String(s.apiKey || '').trim();
+    if (key) {
+        headers['Authorization'] = `Bearer ${key}`;
+    }
+
+    const timeoutMs = (Number(s.timeoutSec) > 0 ? Number(s.timeoutSec) : 25) * 1000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        let status = 0;
+        let data = null;
+        try {
+            const resp = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+            status = resp.status;
+            data = await resp.json().catch(() => null);
+        } catch (err) {
+            // 直连失败（通常是 CORS / 网络），若开启 Tauri 原生 HTTP 通道则尝试之
+            if (s.useTauriHttp && window.__TAURI__ && window.__TAURI__.http && window.__TAURI__.http.fetch) {
+                const res = await window.__TAURI__.http.fetch(url, { method: 'GET', headers, timeout: timeoutMs });
+                status = res.status;
+                data = res.data;
+            } else {
+                throw err;
+            }
+        }
+
+        if (status >= 200 && status < 300) {
+            const ids = (data && Array.isArray(data.data) ? data.data : [])
+                .map(m => m && m.id)
+                .filter(id => typeof id === 'string' && id.trim());
+            if (!ids.length) {
+                throw new Error('接口未返回模型列表（GET /models 返回为空）');
+            }
+            return ids;
+        }
+        throw new Error(`模型列表请求失败：HTTP ${status}`);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function onFetchModelsClick() {
+    const btn = this;
+    const oldText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = '获取中…';
+    try {
+        const ids = await fetchModelList();
+        const $pick = $('#tt-outline-model-pick');
+        $pick.empty().append('<option value="">— 选择模型 —</option>');
+        ids.forEach(id => $pick.append(`<option value="${String(id).replace(/"/g, '&quot;')}">${String(id)}</option>`));
+        $pick.show();
+        const current = extension_settings[MODULE_NAME].model;
+        if (current && ids.includes(current)) {
+            $pick.val(current);
+        }
+        if (typeof toastr !== 'undefined') {
+            toastr.success(`获取到 ${ids.length} 个模型`, 'tt-outline');
+        }
+    } catch (err) {
+        const msg = String((err && err.message) || err);
+        $('#tt-outline-result').val('获取模型失败：' + msg);
+        if (typeof toastr !== 'undefined') {
+            toastr.error('获取模型失败：' + msg, 'tt-outline');
+        }
+    } finally {
+        btn.disabled = false;
+        btn.innerText = oldText;
+    }
+}
+
 /* ---------------- 大纲 API 调用（OpenAI 兼容） ---------------- */
 
 async function callOutlineApi(systemPrompt, userContent) {
@@ -392,8 +475,14 @@ function settingsHtml() {
             <label for="tt-outline-api-key">大纲 API Key（不需要鉴权的中继可留空）</label>
             <input id="tt-outline-api-key" type="password" class="text_pole wide100p" autocomplete="off" placeholder="sk-...">
 
-            <label for="tt-outline-model">大纲模型名</label>
-            <input id="tt-outline-model" type="text" class="text_pole wide100p" placeholder="例如 deepseek-chat / gpt-4o-mini">
+            <label for="tt-outline-model">大纲模型名（可点「获取模型」从接口拉取列表）</label>
+            <div class="flex-container wrap" style="gap:6px;align-items:center;">
+                <input id="tt-outline-model" type="text" class="text_pole flex1" placeholder="例如 deepseek-chat / gpt-4o-mini">
+                <button id="tt-outline-fetch-models" class="menu_button" type="button">获取模型</button>
+            </div>
+            <select id="tt-outline-model-pick" class="text_pole wide100p" style="margin-top:4px;display:none;">
+                <option value="">— 选择模型 —</option>
+            </select>
 
             <div class="flex-container flexFlowRow wrap">
                 <label class="tt-outline-inline">温度 <input id="tt-outline-temperature" type="number" min="0" max="2" step="0.1" class="text_pole"></label>
@@ -465,6 +554,18 @@ function bindSettings() {
     onInput('#tt-outline-api-key', (s, el) => { s.apiKey = $(el).val(); });
     onInput('#tt-outline-model', (s, el) => { s.model = $(el).val(); });
     onInput('#tt-outline-temperature', (s, el) => { s.temperature = Number($(el).val()); });
+
+    // 获取模型按钮 + 模型下拉
+    $('#tt-outline-fetch-models').on('click', onFetchModelsClick);
+    $('#tt-outline-model-pick').on('change', function () {
+        const value = String($(this).val() || '');
+        if (value) {
+            extension_settings[MODULE_NAME].model = value;
+            $('#tt-outline-model').val(value);
+            saveSettings();
+        }
+    });
+
     onInput('#tt-outline-max-tokens', (s, el) => { s.maxTokens = Number($(el).val()); });
     onInput('#tt-outline-timeout', (s, el) => { s.timeoutSec = Number($(el).val()); });
     onInput('#tt-outline-ctx-msgs', (s, el) => { s.contextMessages = Number($(el).val()); });

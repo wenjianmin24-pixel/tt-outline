@@ -6,11 +6,19 @@
  *   如果你的大纲 API 不支持跨域（大多数官方 API 都不支持），
  *   在本机或一台服务器上跑这个中继，把扩展里的「大纲 API 地址」填成中继地址即可。
  *
- * 用法：
- *   UPSTREAM_URL="https://api.openai.com/v1/chat/completions" \
+ * 用法（推荐：UPSTREAM_BASE）：
+ *   UPSTREAM_BASE="https://api.openai.com/v1" \
  *   UPSTREAM_KEY="sk-xxxx" \
  *   PORT=8799 \
  *   node relay-server.js
+ *
+ * 兼容旧用法（UPSTREAM_URL 完整 chat/completions 地址会自动推导 base）：
+ *   UPSTREAM_URL="https://api.openai.com/v1/chat/completions" ...
+ *
+ * 支持：
+ *   - POST /chat/completions  → 转发到大纲 API（生成大纲）
+ *   - GET  /models            → 转发到大纲 API（扩展里「获取模型」按钮）
+ *   - 其它路径原样转发
  *
  * 说明：
  *   - UPSTREAM_KEY 可选：设置了就在服务端注入 Authorization，手机端无需再填 Key；
@@ -24,36 +32,44 @@ const https = require('https');
 const { URL } = require('url');
 
 const upstreamUrl = (process.env.UPSTREAM_URL || '').trim();
+const upstreamBase = (process.env.UPSTREAM_BASE || '').trim();
 const upstreamKey = (process.env.UPSTREAM_KEY || '').trim();
 const port = Number(process.env.PORT || 8799);
 
-if (!upstreamUrl) {
-    console.error('缺少环境变量 UPSTREAM_URL，例如：');
-    console.error('  UPSTREAM_URL="https://api.openai.com/v1/chat/completions" UPSTREAM_KEY="sk-xxx" PORT=8799 node relay-server.js');
+// 推导上游 base（两种配置二选一）
+let base = upstreamBase.replace(/\/+$/, '');
+if (!base && upstreamUrl) {
+    base = upstreamUrl.replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
+}
+if (!base) {
+    console.error('缺少环境变量 UPSTREAM_BASE 或 UPSTREAM_URL，例如：');
+    console.error('  UPSTREAM_BASE="https://api.openai.com/v1" UPSTREAM_KEY="sk-xxx" PORT=8799 node relay-server.js');
     process.exit(1);
 }
 
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
 };
 
-function forwardRequest(reqBody) {
+function forwardRequest(method, path, reqBody) {
     return new Promise((resolve, reject) => {
-        const upstream = new URL(upstreamUrl);
-        const isHttps = upstream.protocol === 'https:';
+        const target = new URL(base.replace(/\/+$/, '') + (path || '/'));
+        const isHttps = target.protocol === 'https:';
         const transport = isHttps ? https : http;
         const headers = {
             'Content-Type': 'application/json',
             ...(upstreamKey ? { Authorization: `Bearer ${upstreamKey}` } : {}),
-            'Content-Length': Buffer.byteLength(reqBody || ''),
         };
+        if (reqBody) {
+            headers['Content-Length'] = Buffer.byteLength(reqBody);
+        }
 
         const request = transport.request(
-            upstream,
-            { method: 'POST', headers, timeout: 60000 },
+            target,
+            { method, headers, timeout: 60000 },
             (response) => {
                 const chunks = [];
                 response.on('data', (chunk) => chunks.push(chunk));
@@ -84,20 +100,22 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    if (req.method !== 'POST') {
+    if (req.method !== 'GET' && req.method !== 'POST') {
         res.writeHead(405, { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('仅支持 POST');
+        res.end('仅支持 GET / POST');
         return;
     }
 
-    // 读取请求体
+    const path = req.url || '/';
+
+    // 读取请求体（POST 时）
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', async () => {
-        const reqBody = Buffer.concat(chunks).toString('utf8');
+        const reqBody = req.method === 'POST' ? Buffer.concat(chunks).toString('utf8') : '';
 
         try {
-            const result = await forwardRequest(reqBody);
+            const result = await forwardRequest(req.method, path, reqBody);
             res.writeHead(result.status, {
                 ...CORS_HEADERS,
                 'Content-Type': 'application/json; charset=utf-8',
@@ -116,8 +134,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, '0.0.0.0', () => {
-    console.log(`tt-outline CORS 中继已启动`);
-    console.log(`  上游地址：${upstreamUrl}`);
-    console.log(`  服务地址：http://0.0.0.0:${port}/chat/completions`);
+    console.log('tt-outline CORS 中继已启动');
+    console.log(`  上游 base：${base}`);
+    console.log(`  服务地址：http://0.0.0.0:${port}（POST /chat/completions、GET /models）`);
     console.log(`  手机端请在扩展里把「大纲 API 地址」填成：http://本机局域网IP:${port}`);
 });
