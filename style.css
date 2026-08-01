@@ -1,14 +1,22 @@
-/* tt-outline 大纲生成器 - 设置面板样式（轻量，仅覆盖必要项） */
+/* tt-outline 大纲生成器 - 设置面板样式（始终可见的普通块，不使用 inline-drawer 折叠） */
 .tt-outline-settings {
     width: 100%;
 }
 
-.tt-outline-settings .inline-drawer-content {
-    padding: 6px 0;
+.tt-outline-settings .tt-outline-title {
+    margin: 6px 0 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
-.tt-outline-settings .inline-drawer-content.hidden {
-    display: none;
+.tt-outline-settings .tt-outline-title small {
+    opacity: 0.8;
+    line-height: 1.5;
+}
+
+.tt-outline-settings .tt-outline-body {
+    padding: 6px 0 12px;
 }
 
 .tt-outline-settings label {
@@ -35,16 +43,4 @@
 .tt-outline-settings textarea.text_pole {
     width: 100%;
     resize: vertical;
-}
-
-.tt-outline-settings hr {
-    border: 0;
-    border-top: 1px solid rgba(128, 128, 128, 0.35);
-    margin: 10px 0;
-}
-
-.tt-outline-settings small {
-    display: block;
-    opacity: 0.8;
-    line-height: 1.5;
 }

@@ -377,64 +377,57 @@ async function onBeforeGeneration(type, options, dryRun) {
 function settingsHtml() {
     return `
     <div class="tt-outline-settings">
-        <div class="inline-drawer tt-outline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
-                <b>大纲生成器 Outline</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        <div class="tt-outline-title">
+            <b>大纲生成器 Outline</b>
+            <small>发送前调用「额外 API + 大纲模型」生成本轮剧情大纲，注入主提示后交给酒馆主 API 生成回复。</small>
+        </div>
+        <div class="tt-outline-body">
+            <label class="checkbox_label">
+                <input type="checkbox" id="tt-outline-enabled"> 启用大纲生成
+            </label>
+
+            <label for="tt-outline-api-base">大纲 API 地址（OpenAI 兼容，可填中转/中继地址）</label>
+            <input id="tt-outline-api-base" type="text" class="text_pole wide100p" placeholder="https://api.openai.com/v1">
+
+            <label for="tt-outline-api-key">大纲 API Key（不需要鉴权的中继可留空）</label>
+            <input id="tt-outline-api-key" type="password" class="text_pole wide100p" autocomplete="off" placeholder="sk-...">
+
+            <label for="tt-outline-model">大纲模型名</label>
+            <input id="tt-outline-model" type="text" class="text_pole wide100p" placeholder="例如 deepseek-chat / gpt-4o-mini">
+
+            <div class="flex-container flexFlowRow wrap">
+                <label class="tt-outline-inline">温度 <input id="tt-outline-temperature" type="number" min="0" max="2" step="0.1" class="text_pole"></label>
+                <label class="tt-outline-inline">最大tokens <input id="tt-outline-max-tokens" type="number" min="16" step="16" class="text_pole"></label>
+                <label class="tt-outline-inline">超时(秒) <input id="tt-outline-timeout" type="number" min="3" step="1" class="text_pole"></label>
+                <label class="tt-outline-inline">取最近消息 <input id="tt-outline-ctx-msgs" type="number" min="1" step="1" class="text_pole"></label>
+                <label class="tt-outline-inline">注入深度 <input id="tt-outline-depth" type="number" min="0" step="1" class="text_pole"></label>
             </div>
-            <div class="inline-drawer-content tt-outline-content">
-                <small>
-                    发送前调用「额外 API + 大纲模型」生成本轮剧情大纲，注入主提示后交给酒馆主 API 生成回复。
-                    注意：大纲 API 需允许浏览器跨域（CORS），否则请使用随附的 relay-server.js 中继。
-                </small>
-                <hr>
-                <label class="checkbox_label">
-                    <input type="checkbox" id="tt-outline-enabled"> 启用大纲生成
-                </label>
 
-                <label for="tt-outline-api-base">大纲 API 地址（OpenAI 兼容，可填中转/中继地址）</label>
-                <input id="tt-outline-api-base" type="text" class="text_pole wide100p" placeholder="https://api.openai.com/v1">
+            <label class="checkbox_label">
+                <input type="checkbox" id="tt-outline-skip-system"> 跳过系统消息
+            </label>
+            <label class="checkbox_label">
+                <input type="checkbox" id="tt-outline-on-retry"> 重试/换一条/续写时也生成大纲
+            </label>
+            <label class="checkbox_label">
+                <input type="checkbox" id="tt-outline-fail-open"> 大纲失败时仍继续发送主请求
+            </label>
+            <label class="checkbox_label">
+                <input type="checkbox" id="tt-outline-tauri-http">
+                尝试 Tauri 原生 HTTP 通道（绕过 CORS；仅当应用内置 http 插件且授权该地址时可用）
+            </label>
 
-                <label for="tt-outline-api-key">大纲 API Key（不需要鉴权的中继可留空）</label>
-                <input id="tt-outline-api-key" type="password" class="text_pole wide100p" autocomplete="off" placeholder="sk-...">
+            <label for="tt-outline-prompt">大纲提示词（支持 {{messages}} / {{user}} / {{char}}，留空使用默认）</label>
+            <textarea id="tt-outline-prompt" class="text_pole wide100p" rows="6"></textarea>
 
-                <label for="tt-outline-model">大纲模型名</label>
-                <input id="tt-outline-model" type="text" class="text_pole wide100p" placeholder="例如 deepseek-chat / gpt-4o-mini">
+            <label for="tt-outline-injection">注入模板（{{outline}} 为大纲占位）</label>
+            <textarea id="tt-outline-injection" class="text_pole wide100p" rows="3"></textarea>
 
-                <div class="flex-container flexFlowRow wrap">
-                    <label class="tt-outline-inline">温度 <input id="tt-outline-temperature" type="number" min="0" max="2" step="0.1" class="text_pole"></label>
-                    <label class="tt-outline-inline">最大tokens <input id="tt-outline-max-tokens" type="number" min="16" step="16" class="text_pole"></label>
-                    <label class="tt-outline-inline">超时(秒) <input id="tt-outline-timeout" type="number" min="3" step="1" class="text_pole"></label>
-                    <label class="tt-outline-inline">取最近消息 <input id="tt-outline-ctx-msgs" type="number" min="1" step="1" class="text_pole"></label>
-                    <label class="tt-outline-inline">注入深度 <input id="tt-outline-depth" type="number" min="0" step="1" class="text_pole"></label>
-                </div>
-
-                <label class="checkbox_label">
-                    <input type="checkbox" id="tt-outline-skip-system"> 跳过系统消息
-                </label>
-                <label class="checkbox_label">
-                    <input type="checkbox" id="tt-outline-on-retry"> 重试/换一条/续写时也生成大纲
-                </label>
-                <label class="checkbox_label">
-                    <input type="checkbox" id="tt-outline-fail-open"> 大纲失败时仍继续发送主请求
-                </label>
-                <label class="checkbox_label">
-                    <input type="checkbox" id="tt-outline-tauri-http">
-                    尝试 Tauri 原生 HTTP 通道（绕过 CORS；仅当应用内置 http 插件且授权该地址时可用）
-                </label>
-
-                <label for="tt-outline-prompt">大纲提示词（支持 {{messages}} / {{user}} / {{char}}，留空使用默认）</label>
-                <textarea id="tt-outline-prompt" class="text_pole wide100p" rows="6"></textarea>
-
-                <label for="tt-outline-injection">注入模板（{{outline}} 为大纲占位）</label>
-                <textarea id="tt-outline-injection" class="text_pole wide100p" rows="3"></textarea>
-
-                <div class="flex-container wrap" style="gap:8px;margin-top:6px;">
-                    <button id="tt-outline-test" class="menu_button">测试生成大纲</button>
-                    <button id="tt-outline-restore" class="menu_button">恢复默认提示词</button>
-                </div>
-                <textarea id="tt-outline-result" class="text_pole wide100p" rows="5" readonly placeholder="测试结果会显示在这里"></textarea>
+            <div class="flex-container wrap" style="gap:8px;margin-top:6px;">
+                <button id="tt-outline-test" class="menu_button">测试生成大纲</button>
+                <button id="tt-outline-restore" class="menu_button">恢复默认提示词</button>
             </div>
+            <textarea id="tt-outline-result" class="text_pole wide100p" rows="5" readonly placeholder="测试结果会显示在这里"></textarea>
         </div>
     </div>`;
 }
@@ -483,10 +476,7 @@ function bindSettings() {
     onInput('#tt-outline-prompt', (s, el) => { s.prompt = $(el).val(); });
     onInput('#tt-outline-injection', (s, el) => { s.injectionTemplate = $(el).val(); });
 
-    // 抽屉折叠
-    $('.tt-outline-settings .tt-outline-drawer .inline-drawer-toggle').on('click', function () {
-        $(this).closest('.tt-outline-drawer').find('.tt-outline-content').toggleClass('hidden');
-    });
+    // 说明：不实现自定义抽屉折叠，设置块始终可见（避免与 TauriTavern 全局 inline-drawer 处理器冲突）
 
     // 测试按钮
     $('#tt-outline-test').on('click', async function () {
@@ -538,9 +528,14 @@ async function initExtension() {
     }
 
     loadSettings();
-    $('#extensions_settings').append(settingsHtml());
-    applySettingsToDom();
-    bindSettings();
+    try {
+        $('#extensions_settings').append(settingsHtml());
+        applySettingsToDom();
+        bindSettings();
+    } catch (err) {
+        console.error('[tt-outline] 设置面板渲染失败：', err);
+        throw err;
+    }
 
     const { eventSource, event_types } = scriptApi;
     eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGeneration);
