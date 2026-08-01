@@ -184,50 +184,42 @@ export async function fetchModelList() {
     if (!base) {
         throw new Error('未填写大纲 API 地址');
     }
-    const url = /\/models$/.test(base) ? base : `${base}/models`;
+    const key = String(s.apiKey || '').trim();
+
+    // 走酒馆后端 /status（custom source）拉模型列表，免 CORS
+    const payload = {
+        chat_completion_source: 'custom',
+        custom_api_format: 'openai_compat',
+        custom_url: base,
+        custom_include_headers: key ? `Authorization: "Bearer ${key}"` : '',
+    };
 
     const headers = { 'Content-Type': 'application/json' };
-    const key = String(s.apiKey || '').trim();
-    if (key) {
-        headers['Authorization'] = `Bearer ${key}`;
+    if (scriptApi && typeof scriptApi.getRequestHeaders === 'function') {
+        Object.assign(headers, scriptApi.getRequestHeaders());
     }
 
     const timeoutMs = (Number(s.timeoutSec) > 0 ? Number(s.timeoutSec) : 25) * 1000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const url = '/api/backends/chat-completions/status';
 
     try {
-        let status = 0;
-        let data = null;
-        try {
-            const resp = await fetch(url, { method: 'GET', headers, signal: controller.signal });
-            status = resp.status;
-            data = await resp.json().catch(() => null);
-        } catch (err) {
-            // 直连失败（通常是 CORS / 网络 / 超时），若开启 Tauri 原生 HTTP 通道则尝试之
-            if (s.useTauriHttp && window.__TAURI__ && window.__TAURI__.http && window.__TAURI__.http.fetch) {
-                try {
-                    const res = await window.__TAURI__.http.fetch(url, { method: 'GET', headers, timeout: timeoutMs });
-                    status = res.status;
-                    data = res.data;
-                } catch (tauriErr) {
-                    throw toFriendlyError(tauriErr, s, url);
-                }
-            } else {
-                throw toFriendlyError(err, s, url);
-            }
-        }
+        const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: controller.signal });
+        const data = await resp.json().catch(() => null);
 
-        if (status >= 200 && status < 300) {
-            const ids = (data && Array.isArray(data.data) ? data.data : [])
-                .map(m => m && m.id)
-                .filter(id => typeof id === 'string' && id.trim());
-            if (!ids.length) {
-                throw new Error('接口未返回模型列表（GET /models 返回为空）');
-            }
-            return ids;
+        if (data && data.error) {
+            throw new Error(`获取模型失败：${(data.error && data.error.message) || data.message || '未知错误'}`);
         }
-        throw new Error(`模型列表请求失败：HTTP ${status}`);
+        const ids = (data && Array.isArray(data.data) ? data.data : [])
+            .map(m => m && m.id)
+            .filter(id => typeof id === 'string' && id.trim());
+        if (!ids.length) {
+            throw new Error('接口未返回模型列表');
+        }
+        return ids;
+    } catch (err) {
+        throw toFriendlyError(err, s, url);
     } finally {
         clearTimeout(timer);
     }
@@ -282,69 +274,76 @@ function toFriendlyError(err, s, url) {
     return new Error(`请求失败（${url || '(未知地址)'}）：${msg}`);
 }
 
-/* ---------------- 大纲 API 调用（OpenAI 兼容） ---------------- */
+/* ---------------- 大纲 API 调用（走酒馆后端转发，免 CORS） ---------------- */
 
-async function callOutlineApi(systemPrompt, userContent) {
+/**
+ * 独立大纲 API 模式：不再浏览器直连外部 API，而是把请求交给酒馆自己的后端
+ * `/api/backends/chat-completions/generate`（SillyTavern 与 TauriTavern 都已实现），
+ * 由酒馆服务器转发到任意 OpenAI 兼容接口（custom source）。
+ * 因此没有 CORS 限制，apiBaseUrl/apiKey/model 随便填。
+ */
+async function callOutlineViaBackend(systemPrompt, userContent) {
     const s = extension_settings[MODULE_NAME];
     const base = String(s.apiBaseUrl || '').trim().replace(/\/+$/, '');
     if (!base) {
         throw new Error('未填写大纲 API 地址');
     }
-    const url = /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`;
-
-    const headers = { 'Content-Type': 'application/json' };
-    const key = String(s.apiKey || '').trim();
-    if (key) {
-        headers['Authorization'] = `Bearer ${key}`;
+    const model = String(s.model || '').trim();
+    if (!model) {
+        throw new Error('未填写大纲模型名');
     }
+    const key = String(s.apiKey || '').trim();
 
-    const body = {
-        model: String(s.model || '').trim(),
+    const payload = {
+        type: 'quiet',
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userContent },
         ],
-        temperature: Number(s.temperature),
+        model,
+        temperature: Number(s.temperature) || 0.8,
         max_tokens: Number(s.maxTokens) > 0 ? Number(s.maxTokens) : 512,
         stream: false,
+        chat_completion_source: 'custom',
+        custom_api_format: 'openai_compat',
+        custom_url: base,
+        custom_include_headers: key ? `Authorization: "Bearer ${key}"` : '',
     };
-    if (!body.model) {
-        throw new Error('未填写大纲模型名');
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (scriptApi && typeof scriptApi.getRequestHeaders === 'function') {
+        Object.assign(headers, scriptApi.getRequestHeaders());
     }
 
     const timeoutMs = (Number(s.timeoutSec) > 0 ? Number(s.timeoutSec) : 25) * 1000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const url = '/api/backends/chat-completions/generate';
 
     try {
-        let response;
-        try {
-            response = await fetch(url, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(body),
-                signal: controller.signal,
-            });
-        } catch (err) {
-            // 直连失败（通常是 CORS / 网络 / 超时）。若开启了 Tauri 原生 HTTP 通道则尝试之。
-            if (s.useTauriHttp && window.__TAURI__ && window.__TAURI__.http && window.__TAURI__.http.fetch) {
-                try {
-                    const httpFetch = window.__TAURI__.http.fetch;
-                    const res = await httpFetch(url, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify(body),
-                        timeout: timeoutMs,
-                    });
-                    return extractOutlineText(res.status, res.data);
-                } catch (tauriErr) {
-                    throw toFriendlyError(tauriErr, s, url);
-                }
-            }
-            throw toFriendlyError(err, s, url);
-        }
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+        });
         const data = await response.json().catch(() => null);
-        return extractOutlineText(response.status, data);
+
+        if (!response.ok || (data && data.error)) {
+            const msg = (data && data.error && data.error.message)
+                || (data && data.message)
+                || `HTTP ${response.status}`;
+            throw new Error(`大纲生成失败：${msg}`);
+        }
+        const text = String(data && data.choices && data.choices[0] && data.choices[0].message
+            ? data.choices[0].message.content
+            : '').trim();
+        if (!text) {
+            throw new Error('大纲返回内容为空');
+        }
+        return text;
+    } catch (err) {
+        throw toFriendlyError(err, s, url);
     } finally {
         clearTimeout(timer);
     }
@@ -375,12 +374,13 @@ async function generateOutlineForCurrentChat() {
         ? '请输出本轮回复的大纲。'
         : chatDump;
 
-    // 酒馆主 API 模式：走 Rust 后端，无 CORS；用当前主模型生成大纲
+    // 酒馆主 API 模式：走酒馆后端（generateQuietPrompt），无 CORS；用当前主模型生成大纲
     if (s.outlineSource === 'main') {
         return await generateOutlineViaMain(prompt, chatDump);
     }
 
-    return await callOutlineApi(prompt, userContent);
+    // 独立大纲 API 模式：走酒馆后端转发（custom source），无 CORS，随便填地址
+    return await callOutlineViaBackend(prompt, userContent);
 }
 
 /** 用酒馆主 API 的 quiet prompt 生成大纲（免 CORS，大纲模型=当前主模型） */
@@ -514,10 +514,10 @@ function settingsHtml() {
         <div class="tt-outline-body">
             <label for="tt-outline-source">大纲生成方式</label>
             <select id="tt-outline-source" class="text_pole wide100p">
-                <option value="api">独立 API（需支持跨域，或填中继地址）</option>
+                <option value="api">独立 API（走酒馆后端转发，免 CORS，随便填地址）</option>
                 <option value="main">酒馆主 API（免 CORS，用当前主模型）</option>
             </select>
-            <small class="tt-outline-tip">选择「酒馆主 API」时无需额外 API/Key/中继，也没有跨域问题，但大纲模型=当前主模型。</small>
+            <small class="tt-outline-tip">两种方式都走酒馆后端转发，没有跨域问题。「独立 API」可用任意 OpenAI 兼容接口当大纲模型；「酒馆主 API」则用当前主模型。</small>
 
             <label class="checkbox_label">
                 <input type="checkbox" id="tt-outline-enabled"> 启用大纲生成

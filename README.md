@@ -83,34 +83,18 @@ TauriTavern 的 TT-Sync 支持同步 `extensions.local` / `extensions.third_part
 
 ---
 
-## 手机端必读：CORS（跨域）问题 ⚠️
+## 手机端必读：CORS（跨域）问题 ✅ 已解决
 
-TauriTavern 手机端本质是 WebView，扩展里直接 `fetch` 外部 API 会受 **CORS** 限制。SillyTavern 主 API 不受影响（走应用内置后端），但**大纲 API 是我们自己调的，绕不开浏览器跨域规则**。
+扩展版（v1.0.6 起）和脚本版的「独立 API」模式**都不再浏览器直连**外部 API，而是把请求交给**酒馆自己的后端**（`/api/backends/chat-completions/*`，SillyTavern 的 Node 后端 / TauriTavern 的 Rust 后端均已实现），由酒馆服务器转发到任意 OpenAI 兼容接口：
 
-三种解决办法，任选其一：
+```
+扩展/脚本 → 酒馆后端（同源，无 CORS）→ 你填的任意 API（服务器间调用，无 CORS）
+```
 
-0. **用「酒馆主 API」模式（零中继、免 CORS，最省事）**
-   在设置里把「大纲生成方式」选为 **酒馆主 API**：大纲请求走 TauriTavern 自己的后端（Rust），没有浏览器跨域限制，也不需要额外 API/Key/中继。代价是大纲模型=当前主模型（不是另一个模型）。适合先跑通流程、或暂时没有中继时用。
+所以 `大纲 API 地址 / Key / 模型名` 现在可以随便填（例如 opencode.ai 的 `https://opencode.ai/zen/go/v1`），**不需要中继、不需要支持 CORS 的提供商**。
 
-1. **用支持 CORS 的 API 提供商**（最简单）
-   常见支持浏览器跨域的中转/聚合服务（如 OpenRouter 等）可直接在扩展里填地址 + Key 使用。
-
-2. **本地/服务器中继**（推荐，官方 API 通用）
-   在本机或一台服务器上运行随附的 `relay-server.js`：
-   ```bash
-   UPSTREAM_BASE="https://api.openai.com/v1" \
-   UPSTREAM_KEY="sk-xxxx" \
-   PORT=8799 \
-   node relay-server.js
-   ```
-   手机和电脑在同一 Wi-Fi 时，扩展里填 `http://电脑局域网IP:8799` 即可（中继同时支持 `POST /chat/completions` 和 `GET /models`，扩展的「获取模型」按钮也能用）。
-   也可以部署到 Render / Railway / Fly.io 等平台拿公网 HTTPS 地址。
-
-   > 兼容旧写法：用 `UPSTREAM_URL="https://api.openai.com/v1/chat/completions"` 也能跑（自动推导 base）。
-
-3. **Tauri 原生 HTTP 通道（实验性）**
-   勾选「尝试 Tauri 原生 HTTP 通道」，直连失败时会尝试 `window.__TAURI__.http`。
-   仅当 TauriTavern 内置了 http 插件并授权该地址时可用，不可用则保持勾选也无害（会回退）。
+> 旧版（≤1.0.5）扩展版直连 fetch 才会被 CORS 拦；如果你用的是旧版请更新。
+> `relay-server.js` 仍保留：如果你想把大纲 API 的调用架到自己的服务器上（例如避免在手机上存 Key），或者跑在很老版本的酒馆上，可以继续用。
 
 ---
 
