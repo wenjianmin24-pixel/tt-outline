@@ -11,9 +11,8 @@
  *
  * 说明：
  *   - source='main'：用酒馆主 API 生成大纲（免 CORS，大纲模型=当前主模型）。推荐先跑通。
- *   - source='api' ：用独立大纲 API（OpenAI 兼容）。注意：脚本在页面/iframe 里 fetch 外部 API
- *                    仍受浏览器 CORS 限制，请用支持跨域的提供商，或把 apiBaseUrl 填成
- *                    relay-server.js 中继地址（http://电脑IP:8799）。
+ *   - source='api' ：用独立大纲 API（OpenAI 兼容）。两种来源都走酒馆后端转发
+ *                    （generateRaw + custom_api），因此没有 CORS 限制，可以随便填 API 地址。
  *   - 修改配置：编辑本文件顶部的 config 对象后重新托管即可。
  * ------------------------------------------------------------
  */
@@ -84,68 +83,52 @@ function buildChatDump() {
 
 /* ---------------- 大纲生成 ---------------- */
 
+/**
+ * 生成大纲。两种来源都走酒馆自己的后端（generateRaw → /api/backends/chat-completions/*），
+ * 由酒馆服务器去调外部 API，因此没有浏览器 CORS 限制：
+ *   - source='main'：不带 custom_api，用当前主连接
+ *   - source='api' ：带 custom_api（apiurl/key/model），用任意 OpenAI 兼容接口
+ */
 async function generateOutline(instructionPrompt, chatDump) {
+    if (typeof generateRaw !== 'function') {
+        throw new Error('酒馆助手未提供 generateRaw（请升级酒馆助手版本）');
+    }
+
+    const baseOptions = {
+        user_input: chatDump,
+        ordered_prompts: [
+            { role: 'system', content: instructionPrompt },
+            'user_input',
+        ],
+    };
+
+    let result;
     if (config.source === 'main') {
-        // 走酒馆主 API（generateRaw 使用当前连接，免 CORS）
-        if (typeof generateRaw !== 'function') {
-            throw new Error('酒馆助手未提供 generateRaw');
+        result = await generateRaw(baseOptions);
+    } else {
+        const base = String(config.apiBaseUrl || '').trim().replace(/\/+$/, '');
+        if (!base) {
+            throw new Error('未填写大纲 API 地址');
         }
-        const combined = `${instructionPrompt}\n\n最近对话（越靠后越新）：\n${chatDump}`;
-        const result = await generateRaw({ user_input: combined });
-        const text = String(result ?? '').trim();
-        if (!text) {
-            throw new Error('主 API 返回的大纲为空');
+        if (!String(config.model || '').trim()) {
+            throw new Error('未填写大纲模型名');
         }
-        return text;
-    }
-
-    // 独立大纲 API（OpenAI 兼容；受 CORS 限制，需支持跨域或走中继）
-    const base = String(config.apiBaseUrl || '').trim().replace(/\/+$/, '');
-    if (!base) {
-        throw new Error('未填写大纲 API 地址');
-    }
-    if (!String(config.model || '').trim()) {
-        throw new Error('未填写大纲模型名');
-    }
-    const url = /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`;
-    const headers = { 'Content-Type': 'application/json' };
-    if (String(config.apiKey || '').trim()) {
-        headers['Authorization'] = `Bearer ${String(config.apiKey).trim()}`;
-    }
-
-    const timeoutMs = (Number(config.timeoutSec) > 0 ? Number(config.timeoutSec) : 25) * 1000;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-        const resp = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
+        result = await generateRaw({
+            ...baseOptions,
+            custom_api: {
+                apiurl: base,
+                key: String(config.apiKey || '').trim(),
                 model: String(config.model).trim(),
-                messages: [
-                    { role: 'system', content: instructionPrompt },
-                    { role: 'user', content: chatDump },
-                ],
-                temperature: Number(config.temperature),
-                max_tokens: Number(config.maxTokens) > 0 ? Number(config.maxTokens) : 512,
-                stream: false,
-            }),
-            signal: controller.signal,
+                source: 'openai',
+            },
         });
-        const data = await resp.json().catch(() => null);
-        if (!resp.ok || !data || !data.choices || !data.choices[0] || !data.choices[0].message) {
-            const detail = data && data.error && data.error.message ? data.error.message : JSON.stringify(data);
-            throw new Error(`大纲 API 返回 HTTP ${resp.status}：${detail || '未知错误'}`);
-        }
-        const text = String(data.choices[0].message.content || '').trim();
-        if (!text) {
-            throw new Error('大纲 API 返回内容为空');
-        }
-        return text;
-    } finally {
-        clearTimeout(timer);
     }
+
+    const text = String(result ?? '').trim();
+    if (!text) {
+        throw new Error('大纲返回为空');
+    }
+    return text;
 }
 
 async function makeOutlineForCurrentChat() {
