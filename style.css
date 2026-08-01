@@ -1,0 +1,50 @@
+/* tt-outline 大纲生成器 - 设置面板样式（轻量，仅覆盖必要项） */
+.tt-outline-settings {
+    width: 100%;
+}
+
+.tt-outline-settings .inline-drawer-content {
+    padding: 6px 0;
+}
+
+.tt-outline-settings .inline-drawer-content.hidden {
+    display: none;
+}
+
+.tt-outline-settings label {
+    display: block;
+    margin: 8px 0 3px;
+    font-size: calc(var(--mainFontSize, 1em) * 0.95);
+    opacity: 0.9;
+}
+
+.tt-outline-settings .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.tt-outline-settings .tt-outline-inline {
+    display: flex;
+    flex-direction: column;
+    margin-right: 10px;
+    min-width: 96px;
+}
+
+.tt-outline-settings textarea.text_pole {
+    width: 100%;
+    resize: vertical;
+}
+
+.tt-outline-settings hr {
+    border: 0;
+    border-top: 1px solid rgba(128, 128, 128, 0.35);
+    margin: 10px 0;
+}
+
+.tt-outline-settings small {
+    display: block;
+    opacity: 0.8;
+    line-height: 1.5;
+}
