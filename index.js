@@ -80,7 +80,8 @@ const defaultSettings = {
     outlineOnRetry: true,    // 重试/换一条/续写时也生成大纲
     skipImpersonate: true,   // 跳过"扮演"请求
     failOpen: true,          // 大纲失败时仍继续发送主请求
-    useTauriHttp: false,     // 尝试 Tauri 原生 HTTP 通道（绕过 CORS，需应用内置 http 插件）
+    useTauriHttp: false,     // 尝试 Tauri 原生 HTTP 通道（TauriTavern 默认未内置 http 插件，通常无效）
+    outlineSource: 'api',    // 'api'=独立大纲 API；'main'=用酒馆主 API（免 CORS，用当前主模型）
 };
 
 let outlineBusy = false;
@@ -233,6 +234,13 @@ export async function fetchModelList() {
 }
 
 async function onFetchModelsClick() {
+    const s = extension_settings[MODULE_NAME];
+    if (s.outlineSource === 'main') {
+        if (typeof toastr !== 'undefined') {
+            toastr.info('当前是「酒馆主 API」模式，不需要获取模型（使用当前主模型）', 'tt-outline');
+        }
+        return;
+    }
     const btn = this;
     const oldText = btn.innerText;
     btn.disabled = true;
@@ -367,7 +375,26 @@ async function generateOutlineForCurrentChat() {
         ? '请输出本轮回复的大纲。'
         : chatDump;
 
+    // 酒馆主 API 模式：走 Rust 后端，无 CORS；用当前主模型生成大纲
+    if (s.outlineSource === 'main') {
+        return await generateOutlineViaMain(prompt, chatDump);
+    }
+
     return await callOutlineApi(prompt, userContent);
+}
+
+/** 用酒馆主 API 的 quiet prompt 生成大纲（免 CORS，大纲模型=当前主模型） */
+async function generateOutlineViaMain(instructionPrompt, chatDump) {
+    if (!scriptApi || typeof scriptApi.generateQuietPrompt !== 'function') {
+        throw new Error('当前环境不支持 generateQuietPrompt（script.js 未导出）');
+    }
+    const combined = `${instructionPrompt}\n\n最近对话（越靠后越新）：\n${chatDump}`;
+    const outline = await scriptApi.generateQuietPrompt({ quietPrompt: combined, removeReasoning: true });
+    const text = String(outline || '').trim();
+    if (!text) {
+        throw new Error('主 API 返回的大纲为空');
+    }
+    return text;
 }
 
 /* ---------------- 注入 / 清理 ---------------- */
@@ -485,6 +512,13 @@ function settingsHtml() {
             <small>发送前调用「额外 API + 大纲模型」生成本轮剧情大纲，注入主提示后交给酒馆主 API 生成回复。</small>
         </div>
         <div class="tt-outline-body">
+            <label for="tt-outline-source">大纲生成方式</label>
+            <select id="tt-outline-source" class="text_pole wide100p">
+                <option value="api">独立 API（需支持跨域，或填中继地址）</option>
+                <option value="main">酒馆主 API（免 CORS，用当前主模型）</option>
+            </select>
+            <small class="tt-outline-tip">选择「酒馆主 API」时无需额外 API/Key/中继，也没有跨域问题，但大纲模型=当前主模型。</small>
+
             <label class="checkbox_label">
                 <input type="checkbox" id="tt-outline-enabled"> 启用大纲生成
             </label>
@@ -543,6 +577,7 @@ function settingsHtml() {
 
 function applySettingsToDom() {
     const s = extension_settings[MODULE_NAME];
+    $('#tt-outline-source').val(s.outlineSource || 'api');
     $('#tt-outline-enabled').prop('checked', !!s.enabled);
     $('#tt-outline-api-base').val(s.apiBaseUrl || '');
     $('#tt-outline-api-key').val(s.apiKey || '');
@@ -569,6 +604,7 @@ function bindSettings() {
         });
     };
 
+    onInput('#tt-outline-source', (s, el) => { s.outlineSource = $(el).val(); });
     onInput('#tt-outline-enabled', (s, el) => { s.enabled = !!$(el).prop('checked'); });
     onInput('#tt-outline-api-base', (s, el) => { s.apiBaseUrl = $(el).val(); });
     onInput('#tt-outline-api-key', (s, el) => { s.apiKey = $(el).val(); });

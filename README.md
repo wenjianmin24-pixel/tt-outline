@@ -65,6 +65,7 @@ TauriTavern 的 TT-Sync 支持同步 `extensions.local` / `extensions.third_part
 | 设置 | 说明 |
 | --- | --- |
 | 启用大纲生成 | 总开关 |
+| 大纲生成方式 | 「独立 API」= 用你额外填的大纲 API（需支持跨域或走中继）；「酒馆主 API」= 用当前主模型生成大纲（免 CORS、免额外配置，但大纲模型=主模型） |
 | 大纲 API 地址 | OpenAI 兼容接口，如 `https://api.openai.com/v1`；可填中转/中继地址（见下方 CORS） |
 | 大纲 API Key | 大纲模型的密钥；不需要鉴权的中继可留空 |
 | 大纲模型名 | 例如 `deepseek-chat`、`gpt-4o-mini`、`qwen-plus` 等；可点旁边的「**获取模型**」按钮直接从接口拉取列表并下拉选择 |
@@ -87,6 +88,9 @@ TauriTavern 的 TT-Sync 支持同步 `extensions.local` / `extensions.third_part
 TauriTavern 手机端本质是 WebView，扩展里直接 `fetch` 外部 API 会受 **CORS** 限制。SillyTavern 主 API 不受影响（走应用内置后端），但**大纲 API 是我们自己调的，绕不开浏览器跨域规则**。
 
 三种解决办法，任选其一：
+
+0. **用「酒馆主 API」模式（零中继、免 CORS，最省事）**
+   在设置里把「大纲生成方式」选为 **酒馆主 API**：大纲请求走 TauriTavern 自己的后端（Rust），没有浏览器跨域限制，也不需要额外 API/Key/中继。代价是大纲模型=当前主模型（不是另一个模型）。适合先跑通流程、或暂时没有中继时用。
 
 1. **用支持 CORS 的 API 提供商**（最简单）
    常见支持浏览器跨域的中转/聚合服务（如 OpenRouter 等）可直接在扩展里填地址 + Key 使用。
