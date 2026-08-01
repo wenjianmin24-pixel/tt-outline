@@ -485,6 +485,14 @@ async function onBeforeGeneration(type, options, dryRun) {
         return;
     }
 
+    // 跳过“合成”事件：酒馆助手(JS-Slash-Runner)的 generateRaw 等会自行再 emit 一次
+    // GENERATION_AFTER_COMMANDS('normal', {}, false)，其 options 为空对象。
+    // 真实发送一定带 options（automatic_trigger 等），空 options = 嵌套/合成信号，
+    // 必须跳过，否则会和脚本版同时启用时互相触发、重复生成大纲。
+    if (!options || typeof options !== 'object' || Object.keys(options).length === 0) {
+        return;
+    }
+
     // 未启用时，顺手清掉可能残留的大纲
     if (!s.enabled) {
         clearOutline();

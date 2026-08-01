@@ -175,6 +175,12 @@ async function onBeforeGeneration(...args) {
     if (dryRun) {
         return;
     }
+    // 跳过“合成”事件：酒馆助手自身的 generateRaw/generate 会再 emit 一次
+    // GENERATION_AFTER_COMMANDS('normal', {}, false)，其 options 为空对象。
+    // 真实发送一定带 options，空 options = 嵌套/合成信号，避免脚本自触发重复生成。
+    if (!options || typeof options !== 'object' || Object.keys(options).length === 0) {
+        return;
+    }
     if (type === 'quiet' || (options && options.quiet_prompt)) {
         return;
     }
