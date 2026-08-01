@@ -82,6 +82,7 @@ const defaultSettings = {
     failOpen: true,          // 大纲失败时仍继续发送主请求
     useTauriHttp: false,     // 尝试 Tauri 原生 HTTP 通道（TauriTavern 默认未内置 http 插件，通常无效）
     outlineSource: 'api',    // 'api'=独立大纲 API；'main'=用酒馆主 API（免 CORS，用当前主模型）
+    showToasts: true,        // 生成成功/失败用 toast 弹窗提示
 };
 
 let outlineBusy = false;
@@ -100,7 +101,27 @@ export function getDebugState() {
         outlineBusy,
         enabled: !!s.enabled,
         configured: !!(s.apiBaseUrl && s.model),
+        lastOutlinePreview: s.lastOutline ? String(s.lastOutline).slice(0, 200) : '',
+        lastOutlineAt: s.lastOutlineAt || null,
     };
+}
+
+/** 剪贴板兜底复制（旧 WebView） */
+function fallbackCopyText(text) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+    } catch (e) {
+        return false;
+    }
 }
 
 /* ---------------- 工具函数 ---------------- */
@@ -430,6 +451,23 @@ function clearOutline() {
     );
 }
 
+/** 记录最近一次生成的大纲（面板展示 + 持久化，跨重启可回看） */
+function setLastOutline(outline, source) {
+    const s = extension_settings[MODULE_NAME];
+    if (!s) {
+        return;
+    }
+    s.lastOutline = String(outline || '');
+    s.lastOutlineAt = Date.now();
+    if (source) {
+        s.lastOutlineSource = source;
+    }
+    if ($('#tt-outline-last').length) {
+        $('#tt-outline-last').val(s.lastOutline);
+    }
+    saveSettings();
+}
+
 /* ---------------- 生成前拦截 ---------------- */
 
 /**
@@ -483,7 +521,11 @@ async function onBeforeGeneration(type, options, dryRun) {
         const outline = await generateOutlineForCurrentChat();
         if (outline) {
             injectOutline(outline);
+            setLastOutline(outline, s.outlineSource === 'main' ? 'main' : 'api');
             console.log('[tt-outline] 已生成本轮大纲并注入主提示');
+            if (s.showToasts && typeof toastr !== 'undefined') {
+                toastr.success('大纲已生成并注入', 'tt-outline');
+            }
         }
     } catch (err) {
         console.warn('[tt-outline] 大纲生成失败：', err);
@@ -556,6 +598,9 @@ function settingsHtml() {
                 <input type="checkbox" id="tt-outline-fail-open"> 大纲失败时仍继续发送主请求
             </label>
             <label class="checkbox_label">
+                <input type="checkbox" id="tt-outline-show-toasts"> 生成成功/失败用弹窗提示
+            </label>
+            <label class="checkbox_label">
                 <input type="checkbox" id="tt-outline-tauri-http">
                 尝试 Tauri 原生 HTTP 通道（绕过 CORS；仅当应用内置 http 插件且授权该地址时可用）
             </label>
@@ -571,6 +616,12 @@ function settingsHtml() {
                 <button id="tt-outline-restore" class="menu_button">恢复默认提示词</button>
             </div>
             <textarea id="tt-outline-result" class="text_pole wide100p" rows="5" readonly placeholder="测试结果会显示在这里"></textarea>
+
+            <label for="tt-outline-last">最近一次生成的大纲（每次发送后自动更新，已注入到主提示）</label>
+            <textarea id="tt-outline-last" class="text_pole wide100p" rows="5" readonly placeholder="发消息后，这里会显示刚生成并注入主提示的大纲"></textarea>
+            <div class="flex-container wrap" style="gap:8px;margin-top:4px;">
+                <button id="tt-outline-copy-last" class="menu_button">复制大纲</button>
+            </div>
         </div>
     </div>`;
 }
@@ -590,6 +641,8 @@ function applySettingsToDom() {
     $('#tt-outline-skip-system').prop('checked', !!s.skipSystemMessages);
     $('#tt-outline-on-retry').prop('checked', !!s.outlineOnRetry);
     $('#tt-outline-fail-open').prop('checked', !!s.failOpen);
+    $('#tt-outline-show-toasts').prop('checked', !!s.showToasts);
+    $('#tt-outline-last').val(s.lastOutline || '');
     $('#tt-outline-tauri-http').prop('checked', !!s.useTauriHttp);
     $('#tt-outline-prompt').val(s.prompt || '');
     $('#tt-outline-injection').val(s.injectionTemplate || '');
@@ -629,6 +682,7 @@ function bindSettings() {
     onInput('#tt-outline-skip-system', (s, el) => { s.skipSystemMessages = !!$(el).prop('checked'); });
     onInput('#tt-outline-on-retry', (s, el) => { s.outlineOnRetry = !!$(el).prop('checked'); });
     onInput('#tt-outline-fail-open', (s, el) => { s.failOpen = !!$(el).prop('checked'); });
+    onInput('#tt-outline-show-toasts', (s, el) => { s.showToasts = !!$(el).prop('checked'); });
     onInput('#tt-outline-tauri-http', (s, el) => { s.useTauriHttp = !!$(el).prop('checked'); });
     onInput('#tt-outline-prompt', (s, el) => { s.prompt = $(el).val(); });
     onInput('#tt-outline-injection', (s, el) => { s.injectionTemplate = $(el).val(); });
@@ -643,6 +697,7 @@ function bindSettings() {
         btn.innerText = '生成中…';
         try {
             const outline = await generateOutlineForCurrentChat();
+            setLastOutline(outline, 'test');
             $('#tt-outline-result').val(outline || '(空)');
             if (typeof toastr !== 'undefined') {
                 toastr.success('大纲生成成功', 'tt-outline');
@@ -665,6 +720,34 @@ function bindSettings() {
         $('#tt-outline-prompt').val(DEFAULT_PROMPT);
         $('#tt-outline-injection').val(DEFAULT_INJECTION);
         saveSettings();
+    });
+
+    // 复制最近大纲
+    $('#tt-outline-copy-last').on('click', function () {
+        const text = String(extension_settings[MODULE_NAME].lastOutline || '');
+        if (!text) {
+            if (typeof toastr !== 'undefined') {
+                toastr.info('还没有生成过大纲', 'tt-outline');
+            }
+            return;
+        }
+        const onOk = () => {
+            if (typeof toastr !== 'undefined') {
+                toastr.success('已复制', 'tt-outline');
+            }
+        };
+        const onFail = () => {
+            if (typeof toastr !== 'undefined') {
+                toastr.warning('复制失败，请手动长按选择文本', 'tt-outline');
+            }
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(onOk).catch(() => {
+                fallbackCopyText(text) ? onOk() : onFail();
+            });
+        } else {
+            fallbackCopyText(text) ? onOk() : onFail();
+        }
     });
 }
 

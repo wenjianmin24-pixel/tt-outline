@@ -80,6 +80,8 @@ TauriTavern 的 TT-Sync 支持同步 `extensions.local` / `extensions.third_part
 | 大纲提示词 | 你填的「另一份大纲提示词」，支持 `{{messages}}` `{{user}}` `{{char}}` 占位符 |
 | 注入模板 | 大纲如何呈现给主模型，`{{outline}}` 是大纲占位 |
 | 测试生成大纲 | 用当前聊天试跑一次，结果在下方文本框显示 |
+| 生成成功/失败用弹窗提示 | 每次发送时是否 toast 提示大纲结果 |
+| 最近一次生成的大纲 | 每次发送后自动更新（含复制按钮），可回看刚注入的大纲 |
 
 ---
 
@@ -116,6 +118,13 @@ TauriTavern 的 TT-Sync 支持同步 `extensions.local` / `extensions.third_part
 因此本扩展可直接放入原版 SillyTavern 的 `public/scripts/extensions/third-party/tt-outline/` 使用，但未经专门测试，以 TauriTavern 表现为准。
 
 > 给扩展作者：如果你在 TauriTavern 里写第三方扩展时遇到「导入成功但置灰无法启用」，优先检查静态 import 的路径深度——TauriTavern 把 `script.js` 放在根目录，和 SillyTavern 的 `/scripts/script.js` 不同。
+
+## 怎么看大纲有没有生成、大纲内容在哪
+
+- **发送时**：默认会弹 toast——成功提示「大纲已生成并注入」，失败提示「大纲生成失败」。可在设置里关掉（「生成成功/失败用弹窗提示」）。
+- **看内容**：扩展设置面板最下方「**最近一次生成的大纲**」会在每次发送后自动更新（含「复制大纲」按钮），跨重启也会保留（存在设置里）。
+- **测试**：点「测试生成大纲」会用当前聊天跑一次，结果在「测试结果」框，同时也会更新「最近一次生成的大纲」。
+- **控制台**：`F12` 里输入 `getDebugState?.()` 或看 `extension_settings.tt_outline.lastOutline` 也能拿到最近大纲。
 
 ## 常见问题
 
