@@ -203,13 +203,17 @@ export async function fetchModelList() {
             status = resp.status;
             data = await resp.json().catch(() => null);
         } catch (err) {
-            // 直连失败（通常是 CORS / 网络），若开启 Tauri 原生 HTTP 通道则尝试之
+            // 直连失败（通常是 CORS / 网络 / 超时），若开启 Tauri 原生 HTTP 通道则尝试之
             if (s.useTauriHttp && window.__TAURI__ && window.__TAURI__.http && window.__TAURI__.http.fetch) {
-                const res = await window.__TAURI__.http.fetch(url, { method: 'GET', headers, timeout: timeoutMs });
-                status = res.status;
-                data = res.data;
+                try {
+                    const res = await window.__TAURI__.http.fetch(url, { method: 'GET', headers, timeout: timeoutMs });
+                    status = res.status;
+                    data = res.data;
+                } catch (tauriErr) {
+                    throw toFriendlyError(tauriErr, s, url);
+                }
             } else {
-                throw err;
+                throw toFriendlyError(err, s, url);
             }
         }
 
@@ -258,6 +262,18 @@ async function onFetchModelsClick() {
     }
 }
 
+/* ---------------- 错误翻译（把 WebView 原始报错转成可读信息） ---------------- */
+
+function toFriendlyError(err, s, url) {
+    const isAbort = !!(err && (err.name === 'AbortError' || (err.message && /abort/i.test(String(err.message)))));
+    const sec = (Number(s && s.timeoutSec) > 0 ? Number(s.timeoutSec) : 25);
+    if (isAbort) {
+        return new Error(`请求超时（超过 ${sec} 秒）：${url || '(未知地址)'}。请检查：① API 地址是否正确且手机能访问；② 该 API 是否支持浏览器跨域（CORS），不支持请改用 relay-server.js 中继或换支持跨域的提供商；③ 网络是否被拦截；④ 可调大“超时(秒)”`);
+    }
+    const msg = String((err && err.message) || err);
+    return new Error(`请求失败（${url || '(未知地址)'}）：${msg}`);
+}
+
 /* ---------------- 大纲 API 调用（OpenAI 兼容） ---------------- */
 
 async function callOutlineApi(systemPrompt, userContent) {
@@ -302,18 +318,22 @@ async function callOutlineApi(systemPrompt, userContent) {
                 signal: controller.signal,
             });
         } catch (err) {
-            // 直连失败（通常是 CORS / 网络）。若开启了 Tauri 原生 HTTP 通道则尝试之。
+            // 直连失败（通常是 CORS / 网络 / 超时）。若开启了 Tauri 原生 HTTP 通道则尝试之。
             if (s.useTauriHttp && window.__TAURI__ && window.__TAURI__.http && window.__TAURI__.http.fetch) {
-                const httpFetch = window.__TAURI__.http.fetch;
-                const res = await httpFetch(url, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify(body),
-                    timeout: timeoutMs,
-                });
-                return extractOutlineText(res.status, res.data);
+                try {
+                    const httpFetch = window.__TAURI__.http.fetch;
+                    const res = await httpFetch(url, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(body),
+                        timeout: timeoutMs,
+                    });
+                    return extractOutlineText(res.status, res.data);
+                } catch (tauriErr) {
+                    throw toFriendlyError(tauriErr, s, url);
+                }
             }
-            throw err;
+            throw toFriendlyError(err, s, url);
         }
         const data = await response.json().catch(() => null);
         return extractOutlineText(response.status, data);
