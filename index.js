@@ -19,13 +19,33 @@ import {
     extension_settings,
 } from '../../../extensions.js';
 import * as extApi from '../../../extensions.js';
-import {
-    eventSource,
-    event_types,
-    setExtensionPrompt,
-    saveSettingsDebounced,
-} from '../../../script.js';
 import { extension_prompt_roles, extension_prompt_types } from '../../../extension-prompts.js';
+
+// 注意：TauriTavern 的主脚本位于 /script.js（根目录），而第三方扩展在
+// /scripts/extensions/third-party/<name>/ 下，需要 ../../../../script.js 才能到根目录；
+// 原版 SillyTavern 的主脚本在 /scripts/script.js，只需 ../../../script.js。
+// 这里用动态导入 + 回退，两种环境都能加载。
+let scriptApi = null;
+
+async function loadScriptApi() {
+    if (scriptApi) {
+        return;
+    }
+    try {
+        // TauriTavern：/script.js
+        scriptApi = await import('../../../../script.js');
+    } catch (e1) {
+        try {
+            // 原版 SillyTavern：/scripts/script.js
+            scriptApi = await import('../../../script.js');
+        } catch (e2) {
+            throw new Error('无法加载酒馆核心模块 script.js：' + String((e1 && e1.message) || e1) + ' / ' + String((e2 && e2.message) || e2));
+        }
+    }
+    if (!scriptApi || typeof scriptApi.eventSource === 'undefined' || typeof scriptApi.setExtensionPrompt !== 'function') {
+        throw new Error('script.js 加载成功但缺少所需导出（eventSource / setExtensionPrompt）');
+    }
+}
 
 // 扩展目录名（manifest 与数据目录中的文件夹名保持一致）
 const MODULE_NAME = 'tt-outline';
@@ -64,7 +84,23 @@ const defaultSettings = {
 };
 
 let outlineBusy = false;
-let initialized = false;
+let initStarted = false;
+
+// 调试辅助：暴露内部引用（不影响正常运行；控制台/测试排查用）
+export function getScriptApi() {
+    return scriptApi;
+}
+
+export function getDebugState() {
+    const s = extension_settings[MODULE_NAME] || {};
+    return {
+        scriptApiLoaded: !!scriptApi,
+        scriptMode: scriptApi && scriptApi.__MODE__ ? scriptApi.__MODE__ : (scriptApi ? 'loaded' : 'not-loaded'),
+        outlineBusy,
+        enabled: !!s.enabled,
+        configured: !!(s.apiBaseUrl && s.model),
+    };
+}
 
 /* ---------------- 工具函数 ---------------- */
 
@@ -81,7 +117,9 @@ function loadSettings() {
 }
 
 function saveSettings() {
-    saveSettingsDebounced();
+    if (scriptApi && typeof scriptApi.saveSettingsDebounced === 'function') {
+        scriptApi.saveSettingsDebounced();
+    }
 }
 
 /** 模板替换（兼容不支持 replaceAll 的旧 WebView） */
@@ -232,9 +270,12 @@ async function generateOutlineForCurrentChat() {
 /* ---------------- 注入 / 清理 ---------------- */
 
 function injectOutline(outlineText) {
+    if (!scriptApi || typeof scriptApi.setExtensionPrompt !== 'function') {
+        return;
+    }
     const s = extension_settings[MODULE_NAME];
     const text = substitute(s.injectionTemplate || DEFAULT_INJECTION, { '{{outline}}': outlineText });
-    setExtensionPrompt(
+    scriptApi.setExtensionPrompt(
         PROMPT_NAME,
         text,
         extension_prompt_types.IN_CHAT,
@@ -245,8 +286,11 @@ function injectOutline(outlineText) {
 }
 
 function clearOutline() {
+    if (!scriptApi || typeof scriptApi.setExtensionPrompt !== 'function') {
+        return;
+    }
     const s = extension_settings[MODULE_NAME] || defaultSettings;
-    setExtensionPrompt(
+    scriptApi.setExtensionPrompt(
         PROMPT_NAME,
         '',
         extension_prompt_types.IN_CHAT,
@@ -479,17 +523,26 @@ function bindSettings() {
 
 /* ---------------- 初始化 ---------------- */
 
-function initExtension() {
-    if (initialized) {
+async function initExtension() {
+    if (initStarted) {
         return;
     }
-    initialized = true;
+    initStarted = true;
+
+    try {
+        await loadScriptApi();
+    } catch (err) {
+        console.error('[tt-outline] 初始化失败：', err);
+        initStarted = false;
+        return;
+    }
 
     loadSettings();
     $('#extensions_settings').append(settingsHtml());
     applySettingsToDom();
     bindSettings();
 
+    const { eventSource, event_types } = scriptApi;
     eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGeneration);
     eventSource.on(event_types.GENERATION_ENDED, clearOutline);
     eventSource.on(event_types.GENERATION_STOPPED, clearOutline);
