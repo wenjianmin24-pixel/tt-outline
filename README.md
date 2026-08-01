@@ -118,7 +118,14 @@ TauriTavern 手机端本质是 WebView，扩展里直接 `fetch` 外部 API 会�
 
 ## 与原版 SillyTavern 的兼容性
 
-本扩展以 **TauriTavern** 为优先目标（其第三方扩展以纯副作用 ES Module 加载，不要求 `registerExtension`）。代码里也保留了 `registerExtension` 兼容分支，理论上可直接放入原版 SillyTavern 的 `public/scripts/extensions/third-party/tt-outline/` 使用，但未做专门测试，以 TauriTavern 表现为准。
+本扩展以 **TauriTavern** 为优先目标（其第三方扩展以纯副作用 ES Module 加载，不要求 `registerExtension`）。代码里保留了 `registerExtension` 兼容分支，并针对两个环境的主脚本路径做了动态导入兼容：
+
+- TauriTavern 主脚本在 `/script.js`（第三方扩展目录是 `/scripts/extensions/third-party/<name>/`，需向上 4 级）；
+- 原版 SillyTavern 主脚本在 `/scripts/script.js`（向上 3 级）。
+
+因此本扩展可直接放入原版 SillyTavern 的 `public/scripts/extensions/third-party/tt-outline/` 使用，但未经专门测试，以 TauriTavern 表现为准。
+
+> 给扩展作者：如果你在 TauriTavern 里写第三方扩展时遇到「导入成功但置灰无法启用」，优先检查静态 import 的路径深度——TauriTavern 把 `script.js` 放在根目录，和 SillyTavern 的 `/scripts/script.js` 不同。
 
 ## 常见问题
 
