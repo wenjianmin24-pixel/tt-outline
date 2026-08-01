@@ -170,7 +170,11 @@ async function onBeforeGeneration(...args) {
     }
     const type = args[0];
     const options = args[1];
-    // 跳过后台 quiet 请求（摘要、世界书等）与扮演
+    const dryRun = args[2];
+    // 跳过试运行（dry run）与后台 quiet 请求（摘要、世界书等）与扮演
+    if (dryRun) {
+        return;
+    }
     if (type === 'quiet' || (options && options.quiet_prompt)) {
         return;
     }
